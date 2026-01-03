@@ -1,0 +1,29 @@
+[Unit]
+Description=RetroCast RPI Multimedia Server
+After=network.target
+
+[Service]
+Type=simple
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/retrocast
+Environment=PATH=/home/pi/retrocast/venv/bin:/usr/local/bin:/usr/bin:/bin
+Environment=HOME=/home/pi
+ExecStart=/home/pi/retrocast/venv/bin/python /home/pi/retrocast/app.py
+Restart=always
+RestartSec=5
+
+# TTY/Framebuffer access for mpv and fbi
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+
+# Memory optimization for Pi Zero 2W (512MB RAM)
+MemoryMax=200M
+CPUQuota=80%
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,28 @@
+# RetroCast RPI - Raspberry Pi Boot Configuration
+# Add these lines to /boot/config.txt (or /boot/firmware/config.txt on newer OS)
+
+# DRM/KMS driver with composite output (required for modern Raspberry Pi OS)
+dtoverlay=vc4-kms-v3d,composite=1
+
+# Enable composite video output (required for CRT)
+enable_tvout=1
+
+# PAL video mode (use 0 for NTSC, 2 for PAL)
+sdtv_mode=2
+
+# 4:3 aspect ratio (1=4:3, 2=14:9, 3=16:9)
+sdtv_aspect=1
+
+# Disable overscan (adjust if needed for your CRT)
+disable_overscan=1
+
+# GPU memory allocation (128MB recommended for video playback)
+gpu_mem=128
+
+# Optional: Overclock settings for Pi Zero 2W (use with caution)
+# arm_freq=1200
+# over_voltage=4
+
+# Optional: Audio configuration
+# dtparam=audio=on
+# audio_pwm_mode=2

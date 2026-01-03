@@ -1,0 +1,967 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>RetroCast RPI - Multimedia Server</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=VT323&family=Space+Mono:wght@400;700&display=swap');
+        
+        :root {
+            --crt-green: #39ff14;
+            --crt-amber: #ffbf00;
+            --crt-blue: #00d4ff;
+            --bg-dark: #0a0a0a;
+            --bg-card: #141414;
+            --border-color: #2a2a2a;
+        }
+        
+        * {
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            font-family: 'Space Mono', monospace;
+            background: var(--bg-dark);
+            background-image: 
+                radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0a 100%);
+            min-height: 100vh;
+        }
+        
+        .retro-title {
+            font-family: 'VT323', monospace;
+            text-shadow: 0 0 10px var(--crt-green), 0 0 20px var(--crt-green);
+        }
+        
+        .retro-text {
+            font-family: 'VT323', monospace;
+        }
+        
+        .crt-border {
+            border: 2px solid var(--crt-green);
+            box-shadow: 0 0 10px rgba(57, 255, 20, 0.3), inset 0 0 20px rgba(0,0,0,0.5);
+        }
+        
+        .crt-button {
+            background: linear-gradient(180deg, #2a2a2a 0%, #1a1a1a 100%);
+            border: 2px solid #3a3a3a;
+            box-shadow: 0 4px 0 #0a0a0a, 0 0 10px rgba(0,0,0,0.5);
+            transition: all 0.1s ease;
+        }
+        
+        .crt-button:active {
+            transform: translateY(2px);
+            box-shadow: 0 2px 0 #0a0a0a;
+        }
+        
+        .crt-button:hover {
+            border-color: var(--crt-green);
+            box-shadow: 0 4px 0 #0a0a0a, 0 0 15px rgba(57, 255, 20, 0.3);
+        }
+        
+        .crt-button.active {
+            background: linear-gradient(180deg, #1a3a1a 0%, #0a2a0a 100%);
+            border-color: var(--crt-green);
+        }
+        
+        .crt-input {
+            background: #0a0a0a;
+            border: 2px solid #3a3a3a;
+            color: var(--crt-green);
+            font-family: 'Space Mono', monospace;
+        }
+        
+        .crt-input:focus {
+            border-color: var(--crt-green);
+            box-shadow: 0 0 10px rgba(57, 255, 20, 0.3);
+            outline: none;
+        }
+        
+        .media-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            transition: all 0.2s ease;
+        }
+        
+        .media-card:hover {
+            border-color: var(--crt-green);
+            box-shadow: 0 0 15px rgba(57, 255, 20, 0.2);
+        }
+        
+        .tab-button {
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s ease;
+        }
+        
+        .tab-button.active {
+            border-bottom-color: var(--crt-green);
+            color: var(--crt-green);
+        }
+        
+        .progress-bar {
+            background: #1a1a1a;
+            height: 8px;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            background: linear-gradient(90deg, var(--crt-green), var(--crt-blue));
+            height: 100%;
+            transition: width 0.3s ease;
+        }
+        
+        .volume-bar {
+            width: 100%;
+            height: 8px;
+            -webkit-appearance: none;
+            appearance: none;
+            background: #1a1a1a;
+            border-radius: 4px;
+        }
+        
+        .volume-bar::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px;
+            height: 16px;
+            background: var(--crt-green);
+            border-radius: 50%;
+            cursor: pointer;
+        }
+        
+        .dropzone {
+            border: 3px dashed #3a3a3a;
+            transition: all 0.3s ease;
+        }
+        
+        .dropzone.dragover {
+            border-color: var(--crt-green);
+            background: rgba(57, 255, 20, 0.1);
+        }
+        
+        .status-dot {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+        
+        .status-dot.playing {
+            background: var(--crt-green);
+            box-shadow: 0 0 10px var(--crt-green);
+        }
+        
+        .status-dot.paused {
+            background: var(--crt-amber);
+            box-shadow: 0 0 10px var(--crt-amber);
+            animation: none;
+        }
+        
+        .status-dot.idle {
+            background: #555;
+            animation: none;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        
+        .scanline {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: repeating-linear-gradient(
+                0deg,
+                rgba(0, 0, 0, 0.1),
+                rgba(0, 0, 0, 0.1) 1px,
+                transparent 1px,
+                transparent 2px
+            );
+            pointer-events: none;
+            z-index: 1000;
+            opacity: 0.3;
+        }
+        
+        .hide-scrollbar::-webkit-scrollbar {
+            display: none;
+        }
+        
+        .hide-scrollbar {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+        
+        .toast {
+            animation: slideIn 0.3s ease, fadeOut 0.3s ease 2.7s forwards;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateY(-100%); opacity: 0; }
+            to { transform: translateY(0); opacity: 1; }
+        }
+        
+        @keyframes fadeOut {
+            from { opacity: 1; }
+            to { opacity: 0; }
+        }
+    </style>
+</head>
+<body class="text-gray-200">
+    <!-- Scanline effect -->
+    <div class="scanline"></div>
+    
+    <!-- Toast Container -->
+    <div id="toast-container" class="fixed top-4 right-4 z-50 flex flex-col gap-2"></div>
+    
+    <!-- Main Container -->
+    <div class="container mx-auto px-4 py-6 max-w-4xl relative z-10">
+        
+        <!-- Header -->
+        <header class="text-center mb-8">
+            <h1 class="retro-title text-4xl md:text-5xl text-green-400 mb-2">
+                📺 RETROCAST RPI
+            </h1>
+            <p class="text-gray-500 text-sm">Headless Multimedia Server</p>
+        </header>
+        
+        <!-- Status Panel -->
+        <div class="crt-border rounded-lg p-4 mb-6 bg-black/50">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-3">
+                    <div id="status-dot" class="status-dot idle"></div>
+                    <span id="status-text" class="retro-text text-xl text-gray-400">IDLE</span>
+                </div>
+                <div id="time-display" class="retro-text text-lg text-green-400">
+                    00:00 / 00:00
+                </div>
+            </div>
+            <div id="now-playing" class="text-sm text-gray-500 mb-3 truncate">
+                Sin reproducción
+            </div>
+            <div class="progress-bar">
+                <div id="progress-fill" class="progress-fill" style="width: 0%"></div>
+            </div>
+        </div>
+        
+        <!-- Transport Controls -->
+        <div class="grid grid-cols-5 gap-2 mb-6">
+            <button id="btn-prev" class="crt-button rounded-lg p-4 text-2xl" onclick="seek(-10)">
+                ⏪
+            </button>
+            <button id="btn-stop" class="crt-button rounded-lg p-4 text-2xl" onclick="stop()">
+                ⏹️
+            </button>
+            <button id="btn-play-pause" class="crt-button rounded-lg p-4 text-2xl" onclick="playPause()">
+                ▶️
+            </button>
+            <button id="btn-next" class="crt-button rounded-lg p-4 text-2xl" onclick="seek(10)">
+                ⏩
+            </button>
+            <button id="btn-loop" class="crt-button rounded-lg p-4 text-2xl" onclick="toggleLoop()">
+                🔁
+            </button>
+        </div>
+        
+        <!-- Volume Control -->
+        <div class="flex items-center gap-4 mb-6 px-2">
+            <button class="crt-button rounded-lg p-3 text-xl" onclick="volumeDown()">🔉</button>
+            <div class="flex-1 flex items-center gap-3">
+                <span class="text-gray-500 text-sm">VOL</span>
+                <div class="flex-1 bg-gray-800 rounded-full h-2 overflow-hidden">
+                    <div id="volume-bar" class="bg-green-500 h-full transition-all" style="width: 100%"></div>
+                </div>
+                <span id="volume-text" class="text-green-400 text-sm w-12 text-right">100%</span>
+            </div>
+            <button class="crt-button rounded-lg p-3 text-xl" onclick="volumeUp()">🔊</button>
+        </div>
+        
+        <!-- Tabs -->
+        <div class="flex border-b border-gray-700 mb-6">
+            <button class="tab-button active flex-1 py-3 text-center" data-tab="youtube" onclick="switchTab('youtube')">
+                📺 YouTube
+            </button>
+            <button class="tab-button flex-1 py-3 text-center" data-tab="library" onclick="switchTab('library')">
+                📁 Biblioteca
+            </button>
+            <button class="tab-button flex-1 py-3 text-center" data-tab="upload" onclick="switchTab('upload')">
+                📤 Subir
+            </button>
+            <button class="tab-button flex-1 py-3 text-center" data-tab="monitor" onclick="switchTab('monitor')">
+                📡 Monitor
+            </button>
+        </div>
+        
+        <!-- Tab Content -->
+        <div id="tab-content">
+            <!-- YouTube Tab -->
+            <div id="tab-youtube" class="tab-panel">
+                <div class="flex gap-2">
+                    <input 
+                        type="text" 
+                        id="youtube-url" 
+                        class="crt-input flex-1 rounded-lg px-4 py-3"
+                        placeholder="Pega la URL de YouTube..."
+                    >
+                    <button 
+                        id="btn-cast"
+                        class="crt-button rounded-lg px-6 py-3 text-green-400 font-bold"
+                        onclick="castYouTube()"
+                    >
+                        📺 CAST
+                    </button>
+                </div>
+                <p class="text-gray-600 text-sm mt-3 text-center">
+                    Limitado a 480p para optimizar rendimiento
+                </p>
+            </div>
+            
+            <!-- Library Tab -->
+            <div id="tab-library" class="tab-panel hidden">
+                <div class="flex gap-2 mb-4">
+                    <button class="crt-button rounded px-4 py-2 text-sm flex-1 library-filter active" data-filter="all" onclick="filterLibrary('all')">
+                        📚 Todo
+                    </button>
+                    <button class="crt-button rounded px-4 py-2 text-sm flex-1 library-filter" data-filter="video" onclick="filterLibrary('video')">
+                        🎬 Video
+                    </button>
+                    <button class="crt-button rounded px-4 py-2 text-sm flex-1 library-filter" data-filter="audio" onclick="filterLibrary('audio')">
+                        🎵 Audio
+                    </button>
+                    <button class="crt-button rounded px-4 py-2 text-sm flex-1 library-filter" data-filter="image" onclick="filterLibrary('image')">
+                        🖼️ Fotos
+                    </button>
+                </div>
+                <div id="library-grid" class="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-96 overflow-y-auto hide-scrollbar">
+                    <!-- Library items will be inserted here -->
+                </div>
+                <div id="library-empty" class="text-center text-gray-500 py-8 hidden">
+                    📭 No hay archivos en la biblioteca
+                </div>
+            </div>
+            
+            <!-- Upload Tab -->
+            <div id="tab-upload" class="tab-panel hidden">
+                <div 
+                    id="dropzone" 
+                    class="dropzone rounded-lg p-12 text-center cursor-pointer"
+                    onclick="document.getElementById('file-input').click()"
+                >
+                    <div class="text-5xl mb-4">📁</div>
+                    <p class="text-gray-400 mb-2">Arrastra archivos aquí</p>
+                    <p class="text-gray-600 text-sm">o haz clic para seleccionar</p>
+                    <input 
+                        type="file" 
+                        id="file-input" 
+                        class="hidden" 
+                        multiple
+                        accept="video/*,audio/*,image/*"
+                        onchange="handleFileSelect(event)"
+                    >
+                </div>
+                <div id="upload-progress" class="mt-4 hidden">
+                    <div class="flex justify-between text-sm mb-2">
+                        <span id="upload-filename" class="text-gray-400 truncate">archivo.mp4</span>
+                        <span id="upload-percent" class="text-green-400">0%</span>
+                    </div>
+                    <div class="progress-bar">
+                        <div id="upload-bar" class="progress-fill" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Monitor Tab -->
+            <div id="tab-monitor" class="tab-panel hidden">
+                <div class="crt-border rounded-lg p-6 bg-black/30">
+                    <div class="flex items-center justify-between mb-6">
+                        <div>
+                            <h3 class="retro-text text-xl text-green-400 mb-1">Modo Monitor</h3>
+                            <p class="text-gray-500 text-sm">Recibe streams UDP/RTP desde otro dispositivo</p>
+                        </div>
+                        <div id="monitor-status" class="flex items-center gap-2">
+                            <span class="status-dot idle"></span>
+                            <span class="text-gray-500">Inactivo</span>
+                        </div>
+                    </div>
+                    
+                    <div class="flex gap-3 mb-6">
+                        <div class="flex-1">
+                            <label class="text-gray-500 text-sm mb-1 block">Puerto UDP</label>
+                            <input 
+                                type="number" 
+                                id="monitor-port" 
+                                class="crt-input w-full rounded px-4 py-2"
+                                value="1234"
+                                min="1024"
+                                max="65535"
+                            >
+                        </div>
+                    </div>
+                    
+                    <button 
+                        id="btn-monitor-toggle"
+                        class="crt-button w-full rounded-lg py-4 text-lg font-bold"
+                        onclick="toggleMonitor()"
+                    >
+                        <span id="monitor-btn-text">📡 ACTIVAR MONITOR</span>
+                    </button>
+                    
+                    <div class="mt-6 p-4 bg-black/50 rounded border border-gray-800">
+                        <p class="text-gray-500 text-sm mb-2">💡 Desde VLC en tu PC:</p>
+                        <code class="text-green-400 text-xs block bg-black/50 p-2 rounded">
+                            Medio → Emitir → Añadir archivo → Emitir<br>
+                            Destino: UDP → <span id="device-ip">DEVICE_IP</span>:1234
+                        </code>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Footer -->
+        <footer class="text-center text-gray-600 text-sm mt-8 pb-4">
+            <p>RetroCast RPI v1.0 | Raspberry Pi Zero 2W</p>
+        </footer>
+    </div>
+
+    <script>
+        // ==================================================================
+        // SOCKET.IO CONNECTION
+        // ==================================================================
+        
+        const socket = io();
+        let currentStatus = {};
+        let library = { video: [], audio: [], image: [] };
+        let currentFilter = 'all';
+        let isLooping = false;
+        let monitorActive = false;
+        
+        socket.on('connect', () => {
+            console.log('Connected to server');
+            socket.emit('get_status');
+            socket.emit('get_library');
+            fetchLibrary();
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('Disconnected from server');
+            showToast('Conexión perdida', 'error');
+        });
+        
+        socket.on('status_update', (status) => {
+            currentStatus = status;
+            updateStatusUI(status);
+        });
+        
+        socket.on('library_updated', () => {
+            fetchLibrary();
+        });
+        
+        socket.on('library_data', (data) => {
+            library = data;
+            renderLibrary();
+        });
+        
+        // ==================================================================
+        // STATUS UPDATE
+        // ==================================================================
+        
+        function updateStatusUI(status) {
+            const statusDot = document.getElementById('status-dot');
+            const statusText = document.getElementById('status-text');
+            const nowPlaying = document.getElementById('now-playing');
+            const timeDisplay = document.getElementById('time-display');
+            const progressFill = document.getElementById('progress-fill');
+            const btnPlayPause = document.getElementById('btn-play-pause');
+            const btnLoop = document.getElementById('btn-loop');
+            const volumeBar = document.getElementById('volume-bar');
+            const volumeText = document.getElementById('volume-text');
+            
+            // Status dot and text
+            statusDot.className = 'status-dot';
+            if (status.is_playing && !status.is_paused) {
+                statusDot.classList.add('playing');
+                statusText.textContent = status.monitor_mode ? 'MONITOR' : 'PLAYING';
+                statusText.className = 'retro-text text-xl text-green-400';
+                btnPlayPause.textContent = '⏸️';
+            } else if (status.is_paused) {
+                statusDot.classList.add('paused');
+                statusText.textContent = 'PAUSED';
+                statusText.className = 'retro-text text-xl text-yellow-400';
+                btnPlayPause.textContent = '▶️';
+            } else {
+                statusDot.classList.add('idle');
+                statusText.textContent = 'IDLE';
+                statusText.className = 'retro-text text-xl text-gray-400';
+                btnPlayPause.textContent = '▶️';
+            }
+            
+            // Now playing
+            nowPlaying.textContent = status.current_media || 'Sin reproducción';
+            
+            // Time and progress
+            const pos = status.position || 0;
+            const dur = status.duration || 0;
+            timeDisplay.textContent = `${formatTime(pos)} / ${formatTime(dur)}`;
+            
+            if (dur > 0) {
+                progressFill.style.width = `${(pos / dur) * 100}%`;
+            } else {
+                progressFill.style.width = '0%';
+            }
+            
+            // Loop button
+            isLooping = status.is_looping;
+            btnLoop.classList.toggle('active', isLooping);
+            
+            // Volume
+            const vol = status.volume || 100;
+            volumeBar.style.width = `${vol}%`;
+            volumeText.textContent = `${Math.round(vol)}%`;
+            
+            // Monitor mode
+            monitorActive = status.monitor_mode;
+            updateMonitorUI();
+        }
+        
+        function formatTime(seconds) {
+            if (!seconds || isNaN(seconds)) return '00:00';
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        // ==================================================================
+        // PLAYBACK CONTROLS
+        // ==================================================================
+        
+        async function playPause() {
+            try {
+                const res = await fetch('/api/control/play_pause', { method: 'POST' });
+                const data = await res.json();
+                if (!data.success) showToast(data.error || 'Error', 'error');
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            }
+        }
+        
+        async function stop() {
+            try {
+                const res = await fetch('/api/control/stop', { method: 'POST' });
+                const data = await res.json();
+                if (data.success) {
+                    showToast('Reproducción detenida', 'success');
+                }
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            }
+        }
+        
+        async function seek(seconds) {
+            try {
+                const action = seconds > 0 ? 'seek_forward' : 'seek_backward';
+                await fetch(`/api/control/${action}`, { method: 'POST' });
+            } catch (e) {
+                console.error('Seek error:', e);
+            }
+        }
+        
+        async function volumeUp() {
+            try {
+                await fetch('/api/control/volume_up', { method: 'POST' });
+            } catch (e) {
+                console.error('Volume error:', e);
+            }
+        }
+        
+        async function volumeDown() {
+            try {
+                await fetch('/api/control/volume_down', { method: 'POST' });
+            } catch (e) {
+                console.error('Volume error:', e);
+            }
+        }
+        
+        async function toggleLoop() {
+            try {
+                const res = await fetch('/api/loop', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !isLooping })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    isLooping = data.loop;
+                    document.getElementById('btn-loop').classList.toggle('active', isLooping);
+                    showToast(isLooping ? 'Loop activado' : 'Loop desactivado', 'success');
+                }
+            } catch (e) {
+                showToast('Error', 'error');
+            }
+        }
+        
+        // ==================================================================
+        // YOUTUBE
+        // ==================================================================
+        
+        async function castYouTube() {
+            const url = document.getElementById('youtube-url').value.trim();
+            if (!url) {
+                showToast('Ingresa una URL de YouTube', 'error');
+                return;
+            }
+            
+            const btn = document.getElementById('btn-cast');
+            btn.disabled = true;
+            btn.textContent = '⏳ Cargando...';
+            
+            try {
+                const res = await fetch('/api/youtube', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast(`Reproduciendo: ${data.title}`, 'success');
+                    document.getElementById('youtube-url').value = '';
+                } else {
+                    showToast(data.error || 'Error al reproducir', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            } finally {
+                btn.disabled = false;
+                btn.textContent = '📺 CAST';
+            }
+        }
+        
+        // Enter key for YouTube input
+        document.getElementById('youtube-url').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') castYouTube();
+        });
+        
+        // ==================================================================
+        // LIBRARY
+        // ==================================================================
+        
+        async function fetchLibrary() {
+            try {
+                const res = await fetch('/api/library');
+                library = await res.json();
+                renderLibrary();
+            } catch (e) {
+                console.error('Library fetch error:', e);
+            }
+        }
+        
+        function filterLibrary(filter) {
+            currentFilter = filter;
+            document.querySelectorAll('.library-filter').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.filter === filter);
+            });
+            renderLibrary();
+        }
+        
+        function renderLibrary() {
+            const grid = document.getElementById('library-grid');
+            const empty = document.getElementById('library-empty');
+            
+            let items = [];
+            if (currentFilter === 'all') {
+                items = [
+                    ...library.video.map(f => ({...f, type: 'video'})),
+                    ...library.audio.map(f => ({...f, type: 'audio'})),
+                    ...library.image.map(f => ({...f, type: 'image'}))
+                ];
+            } else {
+                items = library[currentFilter]?.map(f => ({...f, type: currentFilter})) || [];
+            }
+            
+            items.sort((a, b) => a.name.localeCompare(b.name));
+            
+            if (items.length === 0) {
+                grid.classList.add('hidden');
+                empty.classList.remove('hidden');
+                return;
+            }
+            
+            grid.classList.remove('hidden');
+            empty.classList.add('hidden');
+            
+            grid.innerHTML = items.map(item => `
+                <div class="media-card rounded-lg p-3 flex items-center gap-3">
+                    <span class="text-2xl">${getTypeIcon(item.type)}</span>
+                    <div class="flex-1 min-w-0">
+                        <p class="text-sm text-gray-200 truncate">${escapeHtml(item.name)}</p>
+                        <p class="text-xs text-gray-500">${formatSize(item.size)}</p>
+                    </div>
+                    <button 
+                        class="crt-button rounded p-2 text-green-400"
+                        onclick="playFile('${escapeHtml(item.path)}')"
+                    >▶️</button>
+                    <button 
+                        class="crt-button rounded p-2 text-red-400"
+                        onclick="deleteFile('${escapeHtml(item.relative_path)}', '${escapeHtml(item.name)}')"
+                    >🗑️</button>
+                </div>
+            `).join('');
+        }
+        
+        function getTypeIcon(type) {
+            const icons = { video: '🎬', audio: '🎵', image: '🖼️' };
+            return icons[type] || '📄';
+        }
+        
+        function formatSize(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1048576) return (bytes / 1024).toFixed(1) + ' KB';
+            if (bytes < 1073741824) return (bytes / 1048576).toFixed(1) + ' MB';
+            return (bytes / 1073741824).toFixed(2) + ' GB';
+        }
+        
+        async function playFile(path) {
+            try {
+                const res = await fetch('/api/play', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast(`Reproduciendo: ${data.file}`, 'success');
+                } else {
+                    showToast(data.error || 'Error al reproducir', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            }
+        }
+        
+        async function deleteFile(relativePath, name) {
+            if (!confirm(`¿Eliminar "${name}"?`)) return;
+            
+            try {
+                const res = await fetch('/api/delete', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: relativePath })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    showToast('Archivo eliminado', 'success');
+                    fetchLibrary();
+                } else {
+                    showToast(data.error || 'Error al eliminar', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            }
+        }
+        
+        // ==================================================================
+        // FILE UPLOAD
+        // ==================================================================
+        
+        const dropzone = document.getElementById('dropzone');
+        
+        dropzone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropzone.classList.add('dragover');
+        });
+        
+        dropzone.addEventListener('dragleave', () => {
+            dropzone.classList.remove('dragover');
+        });
+        
+        dropzone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropzone.classList.remove('dragover');
+            const files = e.dataTransfer.files;
+            if (files.length > 0) uploadFiles(files);
+        });
+        
+        function handleFileSelect(e) {
+            const files = e.target.files;
+            if (files.length > 0) uploadFiles(files);
+        }
+        
+        async function uploadFiles(files) {
+            const progressDiv = document.getElementById('upload-progress');
+            const filenameSpan = document.getElementById('upload-filename');
+            const percentSpan = document.getElementById('upload-percent');
+            const uploadBar = document.getElementById('upload-bar');
+            
+            for (const file of files) {
+                progressDiv.classList.remove('hidden');
+                filenameSpan.textContent = file.name;
+                percentSpan.textContent = '0%';
+                uploadBar.style.width = '0%';
+                
+                const formData = new FormData();
+                formData.append('file', file);
+                
+                try {
+                    const xhr = new XMLHttpRequest();
+                    
+                    xhr.upload.addEventListener('progress', (e) => {
+                        if (e.lengthComputable) {
+                            const percent = Math.round((e.loaded / e.total) * 100);
+                            percentSpan.textContent = `${percent}%`;
+                            uploadBar.style.width = `${percent}%`;
+                        }
+                    });
+                    
+                    await new Promise((resolve, reject) => {
+                        xhr.onload = () => {
+                            if (xhr.status === 200) {
+                                const data = JSON.parse(xhr.responseText);
+                                if (data.success) {
+                                    showToast(`Subido: ${data.filename}`, 'success');
+                                    resolve();
+                                } else {
+                                    showToast(data.error || 'Error', 'error');
+                                    reject();
+                                }
+                            } else {
+                                showToast('Error de subida', 'error');
+                                reject();
+                            }
+                        };
+                        xhr.onerror = () => {
+                            showToast('Error de conexión', 'error');
+                            reject();
+                        };
+                        xhr.open('POST', '/api/upload');
+                        xhr.send(formData);
+                    });
+                } catch (e) {
+                    console.error('Upload error:', e);
+                }
+            }
+            
+            setTimeout(() => {
+                progressDiv.classList.add('hidden');
+                fetchLibrary();
+            }, 1000);
+        }
+        
+        // ==================================================================
+        // MONITOR MODE
+        // ==================================================================
+        
+        async function toggleMonitor() {
+            const port = parseInt(document.getElementById('monitor-port').value) || 1234;
+            
+            try {
+                const res = await fetch('/api/monitor', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: !monitorActive, port })
+                });
+                const data = await res.json();
+                
+                if (data.success) {
+                    monitorActive = !monitorActive;
+                    updateMonitorUI();
+                    showToast(monitorActive ? 'Monitor activado' : 'Monitor desactivado', 'success');
+                } else {
+                    showToast(data.error || 'Error', 'error');
+                }
+            } catch (e) {
+                showToast('Error de conexión', 'error');
+            }
+        }
+        
+        function updateMonitorUI() {
+            const btn = document.getElementById('btn-monitor-toggle');
+            const btnText = document.getElementById('monitor-btn-text');
+            const statusDiv = document.getElementById('monitor-status');
+            
+            if (monitorActive) {
+                btn.classList.add('active');
+                btnText.textContent = '🔴 DESACTIVAR MONITOR';
+                statusDiv.innerHTML = '<span class="status-dot playing"></span><span class="text-green-400">Escuchando</span>';
+            } else {
+                btn.classList.remove('active');
+                btnText.textContent = '📡 ACTIVAR MONITOR';
+                statusDiv.innerHTML = '<span class="status-dot idle"></span><span class="text-gray-500">Inactivo</span>';
+            }
+        }
+        
+        // Get device IP for help text
+        fetch('/api/status').then(res => res.json()).then(() => {
+            const ip = window.location.hostname;
+            document.getElementById('device-ip').textContent = ip;
+        });
+        
+        // ==================================================================
+        // TABS
+        // ==================================================================
+        
+        function switchTab(tabName) {
+            document.querySelectorAll('.tab-button').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.tab === tabName);
+            });
+            
+            document.querySelectorAll('.tab-panel').forEach(panel => {
+                panel.classList.add('hidden');
+            });
+            
+            document.getElementById(`tab-${tabName}`).classList.remove('hidden');
+            
+            if (tabName === 'library') fetchLibrary();
+        }
+        
+        // ==================================================================
+        // TOAST NOTIFICATIONS
+        // ==================================================================
+        
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toast-container');
+            const toast = document.createElement('div');
+            
+            const colors = {
+                success: 'bg-green-900 border-green-500 text-green-300',
+                error: 'bg-red-900 border-red-500 text-red-300',
+                info: 'bg-blue-900 border-blue-500 text-blue-300'
+            };
+            
+            toast.className = `toast px-4 py-3 rounded border ${colors[type]} text-sm max-w-sm`;
+            toast.textContent = message;
+            
+            container.appendChild(toast);
+            
+            setTimeout(() => {
+                toast.remove();
+            }, 3000);
+        }
+        
+        // ==================================================================
+        // UTILITIES
+        // ==================================================================
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Periodic status fetch as backup
+        setInterval(() => {
+            if (socket.connected) {
+                socket.emit('get_status');
+            }
+        }, 5000);
+        
+        // Initial load
+        fetchLibrary();
+    </script>
+</body>
+</html>

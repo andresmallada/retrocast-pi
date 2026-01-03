@@ -1,0 +1,41 @@
+# RetroCast RPI - Samba Configuration
+# Place in /etc/samba/smb.conf
+
+[global]
+   workgroup = WORKGROUP
+   server string = RetroCast RPI Media Server
+   security = user
+   map to guest = Bad User
+   dns proxy = no
+   
+   # Performance optimizations for Raspberry Pi Zero 2W
+   socket options = TCP_NODELAY IPTOS_LOWDELAY
+   read raw = yes
+   write raw = yes
+   max xmit = 65535
+   dead time = 15
+   getwd cache = yes
+   
+   # Disable printing (save resources)
+   load printers = no
+   printing = bsd
+   printcap name = /dev/null
+   disable spoolss = yes
+
+[CRT_Media]
+   path = /home/pi/media
+   browseable = yes
+   read only = no
+   guest ok = yes
+   create mask = 0755
+   directory mask = 0755
+   force user = pi
+   force group = pi
+   comment = RetroCast Media Library
+   
+   # Performance tuning
+   strict locking = no
+   min receivefile size = 2048
+   use sendfile = true
+   aio read size = 2048
+   aio write size = 2048
