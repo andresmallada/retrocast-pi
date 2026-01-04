@@ -1,5 +1,4 @@
-# 📺 RetroCast RPI - Headless Multimedia Server
-
+# 📺 RetroCast PI
 Servidor multimedia sin interfaz gráfica para Raspberry Pi Zero 2W conectada por vídeo compuesto (PAL) a una TV CRT. Optimizado para 512MB de RAM.
 
 ## 🎯 Características
@@ -250,7 +249,7 @@ El sistema está optimizado para Pi Zero 2W (512MB RAM):
 
 ## 📜 Licencia
 
-MIT License - Usa libremente este proyecto.
+AGPLv3 - GNU Affero General Public License v3.0
 
 ## 🤝 Contribuciones
 
