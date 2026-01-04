@@ -72,12 +72,15 @@ configure_boot() {
     print_step "Configurando boot/config.txt para salida PAL..."
     
     CONFIG_FILE="/boot/config.txt"
+    CMDLINE_FILE="/boot/cmdline.txt"
     if [ -f "/boot/firmware/config.txt" ]; then
         CONFIG_FILE="/boot/firmware/config.txt"
+        CMDLINE_FILE="/boot/firmware/cmdline.txt"
     fi
     
     # Backup original config
     cp "$CONFIG_FILE" "${CONFIG_FILE}.backup.$(date +%Y%m%d%H%M%S)"
+    cp "$CMDLINE_FILE" "${CMDLINE_FILE}.backup.$(date +%Y%m%d%H%M%S)"
     
     # Configure DRM/KMS driver with composite output
     # Remove any existing vc4 dtoverlay and add the correct one
@@ -97,14 +100,14 @@ configure_boot() {
         echo "enable_tvout=1" >> "$CONFIG_FILE"
     fi
     
-    # Set PAL mode
-    if ! grep -q "^sdtv_mode=2" "$CONFIG_FILE"; then
-        echo "sdtv_mode=2" >> "$CONFIG_FILE"  # PAL
-    fi
-    
     # Set 4:3 aspect ratio
     if ! grep -q "^sdtv_aspect=1" "$CONFIG_FILE"; then
         echo "sdtv_aspect=1" >> "$CONFIG_FILE"  # 4:3
+    fi
+    
+    # CRITICAL: Ignore HDMI to force composite output
+    if ! grep -q "^hdmi_ignore_hotplug=1" "$CONFIG_FILE"; then
+        echo "hdmi_ignore_hotplug=1" >> "$CONFIG_FILE"
     fi
     
     # Disable overscan
@@ -115,6 +118,14 @@ configure_boot() {
     # GPU memory allocation (optimize for video playback)
     if ! grep -q "^gpu_mem=" "$CONFIG_FILE"; then
         echo "gpu_mem=128" >> "$CONFIG_FILE"
+    fi
+    
+    # CRITICAL: Configure cmdline.txt for PAL composite output
+    # This is essential for DRM to use the composite connector
+    if ! grep -q "video=Composite-1" "$CMDLINE_FILE"; then
+        # Append video parameters to the single line in cmdline.txt
+        sed -i 's/$/ video=Composite-1:720x576@50ie vc4.tv_norm=PAL/' "$CMDLINE_FILE"
+        print_step "cmdline.txt configurado para salida PAL 720x576"
     fi
     
     print_step "Configuración de vídeo completada"
@@ -168,7 +179,8 @@ install_python_deps() {
     pip install \
         flask \
         flask-socketio \
-        eventlet \
+        gevent \
+        gevent-websocket \
         werkzeug
     
     deactivate
@@ -269,6 +281,12 @@ Environment=PATH=${INSTALL_DIR}/venv/bin:/usr/local/bin:/usr/bin:/bin
 ExecStart=${INSTALL_DIR}/venv/bin/python ${INSTALL_DIR}/app.py
 Restart=always
 RestartSec=5
+
+# TTY access for DRM video output
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
 
 # Memory optimization for Pi Zero 2W
 MemoryMax=200M

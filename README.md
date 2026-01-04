@@ -5,7 +5,7 @@ Servidor multimedia sin interfaz gráfica para Raspberry Pi Zero 2W conectada po
 ## 🎯 Características
 
 - **Reproducción Local**: Vídeo, audio e imágenes desde biblioteca local
-- **YouTube Casting**: Streaming de YouTube limitado a 480p para optimizar CPU
+- **YouTube Casting**: Streaming de YouTube limitado a 360p para optimizar CPU
 - **Modo Monitor**: Recepción de streams UDP/RTP desde VLC u otros emisores
 - **Splash Screen**: Imagen de espera en estado idle (no pantalla negra)
 - **Interfaz Web Retro**: SPA con estética dark mode, touch-friendly
@@ -72,10 +72,45 @@ smb://raspberrypi/CRT_Media
 
 ### Modo Monitor (Recibir Stream)
 1. Activa "Modo Monitor" en la interfaz web
-2. Desde VLC en tu PC:
-   - Medio → Emitir → Selecciona archivo
-   - Destino: UDP → [IP_DEL_PI]:1234
-   - Códec: H.264 + MP3 (para compatibilidad)
+2. Desde VLC en tu PC, configura el streaming (ver sección detallada abajo)
+
+## 📡 Streaming desde VLC
+
+Para enviar video desde tu PC a la TV CRT via RetroCast:
+
+### Configuración en VLC (GUI)
+
+1. **Menú:** `Media` → `Stream...` (o `Ctrl+S`)
+2. **Añadir** el archivo de video → Click **Stream** → **Next**
+3. **Destino:** Selecciona `UDP (legacy)` → **Add**
+4. **Configuración:**
+   - **Dirección:** `[IP_DEL_PI]` (ej: 192.168.0.105)
+   - **Puerto:** `1234`
+5. **Transcoding** (importante para Pi Zero 2W):
+   - Activa **Activate Transcoding**
+   - Perfil: `Video - H.264 + MP3 (MP4)`
+   - Click en el **icono de llave** para editar:
+     - **Video codec:** H.264
+     - **Bitrate:** 1000-1500 kb/s
+     - **Resolución:** 640x480 o menor
+     - **Frame rate:** 25 fps (PAL)
+6. Click **Next** → **Stream**
+
+### Alternativa por línea de comandos
+
+```bash
+vlc video.mp4 --sout '#transcode{vcodec=h264,vb=1200,scale=0.5,fps=25,acodec=none}:udp{dst=192.168.0.105:1234}'
+```
+
+### Configuración recomendada para fluidez
+
+| Parámetro | Valor | Notas |
+|-----------|-------|-------|
+| Codec | H.264 | Compatible con hardware decoding |
+| Bitrate | 1000-1500 kbps | Menor = más fluido |
+| Resolución | 480p o menor | 720x576 máximo para PAL |
+| FPS | 25 | Estándar PAL |
+| Audio | Desactivado | No hay interfaz de audio en Pi Zero 2W |
 
 ## ⚙️ Comandos de Servicio
 
@@ -98,18 +133,39 @@ sudo systemctl restart retrocast
 
 ## 🔧 Configuración de Vídeo
 
-El script configura automáticamente `/boot/config.txt` (o `/boot/firmware/config.txt`) para salida PAL:
+El script configura automáticamente los archivos de boot para salida PAL.
+
+### config.txt
 
 | Parámetro | Valor | Descripción |
 |-----------|-------|-------------|
 | `dtoverlay` | `vc4-kms-v3d,composite=1` | Driver KMS con salida compuesta |
 | `enable_tvout` | 1 | Habilita salida compuesta |
-| `sdtv_mode` | 2 | PAL (usar 0 para NTSC) |
 | `sdtv_aspect` | 1 | Aspect ratio 4:3 |
+| `hdmi_ignore_hotplug` | 1 | **CRÍTICO**: Fuerza salida compuesta |
 | `disable_overscan` | 1 | Desactiva overscan |
 | `gpu_mem` | 128 | Memoria GPU para vídeo |
 
-> **Nota**: El driver `vc4-kms-v3d` con `composite=1` es requerido en versiones modernas de Raspberry Pi OS para la salida de vídeo compuesto.
+### cmdline.txt
+
+El script añade estos parámetros **esenciales** al final de la línea:
+
+```
+video=Composite-1:720x576@50ie vc4.tv_norm=PAL
+```
+
+> ⚠️ **IMPORTANTE**: Sin estos parámetros en cmdline.txt, el driver DRM no detectará el conector compuesto y no habrá salida de video.
+
+### Servicio systemd
+
+El servicio requiere acceso TTY para que MPV pueda usar DRM:
+
+```ini
+StandardInput=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+```
 
 ## 🎬 Formatos Soportados
 
@@ -151,10 +207,14 @@ La imagen splash se genera automáticamente durante la instalación (720x576 PAL
 ## 🐛 Solución de Problemas
 
 ### No hay vídeo en la TV
-1. Verifica que `/boot/config.txt` tenga `dtoverlay=vc4-kms-v3d,composite=1`
-2. Verifica que tenga `enable_tvout=1`
+1. Verifica `/boot/config.txt`:
+   - `dtoverlay=vc4-kms-v3d,composite=1`
+   - `enable_tvout=1`
+   - `hdmi_ignore_hotplug=1`
+2. Verifica `/boot/cmdline.txt` contenga al final:
+   - `video=Composite-1:720x576@50ie vc4.tv_norm=PAL`
 3. Reinicia el Pi
-4. Prueba diferentes valores de `sdtv_mode` (0=NTSC, 2=PAL)
+4. Para NTSC, cambia `vc4.tv_norm=NTSC` y resolución a `720x480@60ie`
 
 ### YouTube no funciona
 1. Actualiza yt-dlp: `pip3 install -U yt-dlp`
@@ -171,14 +231,16 @@ La imagen splash se genera automáticamente durante la instalación (720x576 PAL
 
 ## 📊 Optimización de Memoria
 
-El sistema está optimizado para 512MB de RAM:
+El sistema está optimizado para Pi Zero 2W (512MB RAM):
 - Sin X11/escritorio
 - MPV con caché limitado (10 segundos, 50MB demuxer)
-- YouTube máximo 480p con caché en `/tmp/yt-dlp-cache`
+- YouTube máximo 360p (optimizado para CPU limitada)
+- Escalado automático a 720x576 PAL (reduce carga de CPU)
 - Swappiness reducido a 10
 - Límite de memoria del servicio: 200MB
 - CPUQuota: 80%
-- Backend asíncrono con eventlet (menor overhead que threading)
+- Backend asíncrono con gevent
+- Frame dropping habilitado para videos pesados
 
 ## 🔒 Seguridad
 

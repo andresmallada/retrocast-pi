@@ -13,13 +13,12 @@ ExecStart=/home/pi/retrocast/venv/bin/python /home/pi/retrocast/app.py
 Restart=always
 RestartSec=5
 
-# TTY/Framebuffer access for mpv and fbi
+# TTY/Framebuffer access for mpv DRM output
 StandardInput=tty
 StandardOutput=journal
 StandardError=journal
 TTYPath=/dev/tty1
 TTYReset=yes
-TTYVHangup=yes
 
 # Memory optimization for Pi Zero 2W (512MB RAM)
 MemoryMax=200M

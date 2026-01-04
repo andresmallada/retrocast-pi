@@ -5,9 +5,9 @@ Backend for Raspberry Pi Zero 2W with composite video output (PAL)
 Optimized for 512MB RAM
 """
 
-# Eventlet monkey patching MUST be first
-import eventlet
-eventlet.monkey_patch()
+# Gevent monkey patching MUST be first
+from gevent import monkey
+monkey.patch_all()
 
 import os
 import sys
@@ -16,8 +16,8 @@ import signal
 import socket
 import mimetypes
 import subprocess
-import threading
 import time
+import threading
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 
@@ -39,9 +39,9 @@ ALLOWED_EXTENSIONS = {
 MPV_SOCKET = "/tmp/mpvsocket"
 SPLASH_IMAGE = "/home/pi/retrocast/splash.png"
 
-# YouTube quality limit for 480p (critical for Pi Zero 2W)
-# Format priority: separate video+audio (better quality) > combined
-YT_FORMAT = "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+# YouTube quality limit for 360p (optimized for Pi Zero 2W)
+# Lower resolution = smoother playback on limited hardware
+YT_FORMAT = "bestvideo[height<=360]+bestaudio/best[height<=360]/best"
 
 # ==============================================================================
 # FLASK APP INITIALIZATION
@@ -52,7 +52,7 @@ app.config['SECRET_KEY'] = 'retrocast-secret-key-change-in-production'
 app.config['UPLOAD_FOLDER'] = str(UPLOAD_FOLDER)
 app.config['MAX_CONTENT_LENGTH'] = 2 * 1024 * 1024 * 1024  # 2GB max upload
 
-socketio = SocketIO(app, async_mode='eventlet', cors_allowed_origins="*")
+socketio = SocketIO(app, async_mode='gevent', cors_allowed_origins="*")
 
 # ==============================================================================
 # MEDIA CONTROLLER CLASS
@@ -94,25 +94,23 @@ class MediaController:
         time.sleep(0.3)  # Allow processes to terminate
         
     def _get_mpv_base_args(self) -> List[str]:
-        """Get base MPV arguments optimized for composite PAL output."""
-        # openvt runs mpv on tty1 for proper VT/DRM access
+        """Get base MPV arguments optimized for composite PAL output on Pi Zero 2W."""
         return [
-            'openvt', '-f', '-s', '-c', '1', '--',
             'mpv',
             '--vo=drm',                    # Direct DRM output
             '--drm-connector=Composite-1', # Use composite output
             '--fs',                        # Fullscreen
-            '--af=scaletempo',             # Maintain audio pitch during speed changes
+            '--ao=null',                   # No audio output (no audio interface)
             '--input-ipc-server=' + MPV_SOCKET,
             '--no-terminal',               # No terminal output
             '--no-osc',                    # No on-screen controller (save RAM)
             '--no-config',                 # Skip config file (faster startup)
             '--cache=yes',                 # Enable cache
-            '--cache-secs=10',             # Cache 10 seconds
-            '--demuxer-max-bytes=50M',     # Limit demuxer memory
-            '--hwdec=auto',                # Hardware decoding if available
-            '--video-sync=audio',          # Sync video to audio
-            '--audio-device=auto',         # Auto audio device
+            '--cache-secs=10',             # Cache seconds
+            '--demuxer-max-bytes=50M',     # Demuxer memory
+            '--hwdec=auto',                # Auto hardware decoding
+            '--framedrop=vo',              # Frame dropping if needed
+            '--vf=scale=720:576',          # Scale to PAL resolution (reduces CPU)
         ]
     
     def _send_mpv_command(self, command: Dict[str, Any]) -> Optional[Dict]:
@@ -162,9 +160,27 @@ class MediaController:
     def _start_status_thread(self):
         """Start thread to monitor playback status and emit updates."""
         self._stop_status_thread.clear()
+        print("Starting status monitoring thread...")
         
         def status_loop():
+            print("Status loop started")
             consecutive_failures = 0
+            socket_ready = False
+            
+            # Wait for MPV socket to be ready (up to 10 seconds)
+            for _ in range(10):
+                if self._stop_status_thread.is_set():
+                    return
+                if os.path.exists(MPV_SOCKET):
+                    socket_ready = True
+                    print("MPV socket ready")
+                    break
+                time.sleep(1)
+            
+            if not socket_ready:
+                print("MPV socket never became ready")
+                return
+            
             while not self._stop_status_thread.is_set():
                 try:
                     # Watchdog: check if process is alive
@@ -180,7 +196,7 @@ class MediaController:
                         response = self._get_mpv_property('time-pos')
                         if response is None and self.is_playing:
                             consecutive_failures += 1
-                            if consecutive_failures >= 5:
+                            if consecutive_failures >= 15:  # More tolerance
                                 print("MPV unresponsive, handling as ended")
                                 self._handle_playback_ended()
                                 break
@@ -188,6 +204,7 @@ class MediaController:
                             consecutive_failures = 0
                     
                     status = self.get_status()
+                    print(f"Emitting status: pos={status.get('position')}, dur={status.get('duration')}")
                     socketio.emit('status_update', status)
                         
                 except Exception as e:
@@ -200,14 +217,12 @@ class MediaController:
                 
                 time.sleep(1)
         
-        self._status_thread = threading.Thread(target=status_loop, daemon=True)
-        self._status_thread.start()
+        self._status_thread = socketio.start_background_task(status_loop)
     
     def _stop_status_monitoring(self):
-        """Stop the status monitoring thread."""
+        """Stop the status monitoring task."""
         self._stop_status_thread.set()
-        if self._status_thread:
-            self._status_thread.join(timeout=2)
+        time.sleep(0.5)  # Allow task to exit gracefully
     
     def _handle_playback_ended(self):
         """Handle when playback ends or stream is lost."""
@@ -245,20 +260,20 @@ class MediaController:
             self.splash_process = None
     
     def _show_splash(self):
-        """Show splash screen on framebuffer using mpv via openvt."""
+        """Show splash screen on framebuffer using fbi."""
         try:
             # Kill existing splash first
             self._kill_splash()
             
             if os.path.exists(SPLASH_IMAGE):
+                # Use fbi for reliable framebuffer display
                 self.splash_process = subprocess.Popen(
                     [
-                        'openvt', '-f', '-s', '-c', '1', '--',
-                        'mpv', '--vo=drm', '--drm-connector=Composite-1',
-                        '--fs', '--image-display-duration=inf',
-                        '--no-terminal', '--no-osc', '--no-config',
-                        '--video-aspect-override=4:3',
-                        '--really-quiet',
+                        'sudo', 'fbi',
+                        '-T', '1',           # Use tty1
+                        '-d', '/dev/fb0',    # Framebuffer device
+                        '-noverbose',        # No status bar
+                        '-a',                # Auto-zoom
                         SPLASH_IMAGE
                     ],
                     stdout=subprocess.DEVNULL,
@@ -299,21 +314,16 @@ class MediaController:
                 return {'success': False, 'error': 'Tipo de archivo no soportado'}
     
     def _play_image(self, filepath: str) -> Dict[str, Any]:
-        """Display image using mpv on DRM framebuffer via openvt."""
+        """Display image using fbi on framebuffer."""
         try:
+            # Use fbi for reliable framebuffer display
             args = [
-                'openvt', '-f', '-s', '-c', '1', '--',
-                'mpv',
-                '--vo=drm',
-                '--drm-connector=Composite-1',
-                '--fs',
-                '--image-display-duration=inf',
-                '--input-ipc-server=' + MPV_SOCKET,
-                '--no-terminal',
-                '--no-osc',
-                '--no-config',
-                '--loop-file=inf',
-                '--video-aspect-override=4:3',
+                'sudo', 'fbi',
+                '-T', '1',           # Use tty1
+                '-d', '/dev/fb0',    # Framebuffer device
+                '-noverbose',        # No status bar
+                '-a',                # Auto-zoom
+                '-1',                # Don't loop (single image)
                 filepath
             ]
             self.current_process = subprocess.Popen(
@@ -443,12 +453,11 @@ class MediaController:
             
             try:
                 args = [
-                    'openvt', '-f', '-s', '-c', '1', '--',
                     'mpv',
                     '--vo=drm',
                     '--drm-connector=Composite-1',   # Use composite output
                     '--fs',
-                    '--af=scaletempo',
+                    '--ao=null',                     # No audio output
                     '--input-ipc-server=' + MPV_SOCKET,
                     '--no-terminal',
                     '--no-osc',
@@ -844,7 +853,12 @@ def handle_get_library():
 def cleanup(signum=None, frame=None):
     """Cleanup on exit."""
     print("\nLimpiando procesos...")
-    media_controller.stop()
+    # Kill processes directly without blocking
+    try:
+        subprocess.run(['pkill', '-9', 'mpv'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+        subprocess.run(['pkill', '-9', 'fbi'], stderr=subprocess.DEVNULL, stdout=subprocess.DEVNULL)
+    except Exception:
+        pass
     sys.exit(0)
 
 signal.signal(signal.SIGINT, cleanup)
